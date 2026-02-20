@@ -1,0 +1,263 @@
+diff --git a/fuzzers/aflplusplus_asan/build.sh b/fuzzers/aflplusplus_asan/build.sh
+new file mode 100755
+index 00000000..9f7f9d22
+--- /dev/null
++++ b/fuzzers/aflplusplus_asan/build.sh
+@@ -0,0 +1,22 @@
++#!/bin/bash
++set -e
++
++##
++# Pre-requirements:
++# - env FUZZER: path to fuzzer work dir
++##
++
++if [ ! -d "$FUZZER/repo" ]; then
++    echo "fetch.sh must be executed first."
++    exit 1
++fi
++
++cd "$FUZZER/repo"
++export CC=clang
++export CXX=clang++
++export AFL_NO_X86=1
++export PYTHON_INCLUDE=/
++make -j$(nproc) || exit 1
++make -C utils/aflpp_driver || exit 1
++
++mkdir -p "$OUT/afl" "$OUT/cmplog"
+diff --git a/fuzzers/aflplusplus_asan/fetch.sh b/fuzzers/aflplusplus_asan/fetch.sh
+new file mode 100755
+index 00000000..4caa9d48
+--- /dev/null
++++ b/fuzzers/aflplusplus_asan/fetch.sh
+@@ -0,0 +1,46 @@
++#!/bin/bash
++set -e
++
++##
++# Pre-requirements:
++# - env FUZZER: path to fuzzer work dir
++##
++
++git clone --no-checkout https://github.com/AFLplusplus/AFLplusplus "$FUZZER/repo"
++git -C "$FUZZER/repo" checkout 458eb0813a6f7d63eed97f18696bca8274533123
++
++# Fix: CMake-based build systems fail with duplicate (of main) or undefined references (of LLVMFuzzerTestOneInput)
++sed -i '{s/^int main/__attribute__((weak)) &/}' $FUZZER/repo/utils/aflpp_driver/aflpp_driver.c
++sed -i '{s/^int LLVMFuzzerTestOneInput/__attribute__((weak)) &/}' $FUZZER/repo/utils/aflpp_driver/aflpp_driver.c
++cat >> $FUZZER/repo/utils/aflpp_driver/aflpp_driver.c << EOF
++__attribute__((weak))
++int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size)
++{
++  // assert(0 && "LLVMFuzzerTestOneInput should not be implemented in afl_driver");
++  return 0;
++}
++EOF
++
++patch -p1 -d "$FUZZER/repo" << EOF
++--- a/utils/aflpp_driver/aflpp_driver.c
+++++ b/utils/aflpp_driver/aflpp_driver.c
++@@ -53,7 +53,7 @@
++   #include "hash.h"
++ #endif
++
++-int                   __afl_sharedmem_fuzzing = 1;
+++int                   __afl_sharedmem_fuzzing = 0;
++ extern unsigned int * __afl_fuzz_len;
++ extern unsigned char *__afl_fuzz_ptr;
++
++@@ -111,7 +111,8 @@ extern unsigned int * __afl_fuzz_len;
++ __attribute__((weak)) int LLVMFuzzerInitialize(int *argc, char ***argv);
++
++ // Notify AFL about persistent mode.
++-static volatile char AFL_PERSISTENT[] = "##SIG_AFL_PERSISTENT##";
+++// DISABLED to avoid afl-showmap misbehavior
+++static volatile char AFL_PERSISTENT[] = "##SIG_AFL_NOT_PERSISTENT##";
++ int                  __afl_persistent_loop(unsigned int);
++
++ // Notify AFL about deferred forkserver.
++EOF
+diff --git a/fuzzers/aflplusplus_asan/findings.sh b/fuzzers/aflplusplus_asan/findings.sh
+new file mode 100755
+index 00000000..afc482c5
+--- /dev/null
++++ b/fuzzers/aflplusplus_asan/findings.sh
+@@ -0,0 +1,14 @@
++#!/bin/bash
++
++##
++# Pre-requirements:
++# - env SHARED: path to directory shared with host (to store results)
++##
++
++CRASH_DIR="$SHARED/findings/crashes"
++
++if [ ! -d "$CRASH_DIR" ]; then
++    exit 1
++fi
++
++find "$CRASH_DIR" -type f -name 'id:*'
+diff --git a/fuzzers/aflplusplus_asan/instrument.sh b/fuzzers/aflplusplus_asan/instrument.sh
+new file mode 100755
+index 00000000..21c768fd
+--- /dev/null
++++ b/fuzzers/aflplusplus_asan/instrument.sh
+@@ -0,0 +1,50 @@
++#!/bin/bash
++set -e
++
++##
++# Pre-requirements:
++# - env FUZZER: path to fuzzer work dir
++# - env TARGET: path to target work dir
++# - env MAGMA: path to Magma support files
++# - env OUT: path to directory where artifacts are stored
++# - env CFLAGS and CXXFLAGS must be set to link against Magma instrumentation
++##
++
++export CC="$FUZZER/repo/afl-clang-fast"
++export CXX="$FUZZER/repo/afl-clang-fast++"
++export AFL_USE_ASAN=1
++export CFLAGS="$CFLAGS -fsanitize=address"
++export CXXFLAGS="$CXXFLAGS -fsanitize=address"
++export LDFLAGS="$LDFLAGS -fsanitize=address"
++export AS="llvm-as"
++
++export LIBS="$LIBS -lc++ -lc++abi $FUZZER/repo/utils/aflpp_driver/libAFLDriver.a"
++
++# AFL++'s driver is compiled against libc++
++export CXXFLAGS="$CXXFLAGS -stdlib=libc++"
++
++# Build the AFL-only instrumented version
++(
++    export OUT="$OUT/afl"
++    export LDFLAGS="$LDFLAGS -L$OUT"
++
++    "$MAGMA/build.sh"
++    "$TARGET/build.sh"
++)
++
++# Build the CmpLog instrumented version
++
++(
++    export OUT="$OUT/cmplog"
++    export LDFLAGS="$LDFLAGS -L$OUT"
++    # export CFLAGS="$CFLAGS -DMAGMA_DISABLE_CANARIES"
++
++    export AFL_LLVM_CMPLOG=1
++
++    "$MAGMA/build.sh"
++    "$TARGET/build.sh"
++)
++
++# NOTE: We pass $OUT directly to the target build.sh script, since the artifact
++#       itself is the fuzz target. In the case of Angora, we might need to
++#       replace $OUT by $OUT/fast and $OUT/track, for instance.
+diff --git a/fuzzers/aflplusplus_asan/preinstall.sh b/fuzzers/aflplusplus_asan/preinstall.sh
+new file mode 100755
+index 00000000..e15163fe
+--- /dev/null
++++ b/fuzzers/aflplusplus_asan/preinstall.sh
+@@ -0,0 +1,35 @@
++#!/bin/bash
++set -e
++
++apt-get update && \
++    apt-get install -y make clang-9 llvm-9-dev libc++-9-dev libc++abi-9-dev \
++        build-essential git wget gcc-7-plugin-dev
++
++update-alternatives \
++  --install /usr/lib/llvm              llvm             /usr/lib/llvm-9  20 \
++  --slave   /usr/bin/llvm-config       llvm-config      /usr/bin/llvm-config-9  \
++    --slave   /usr/bin/llvm-ar           llvm-ar          /usr/bin/llvm-ar-9 \
++    --slave   /usr/bin/llvm-as           llvm-as          /usr/bin/llvm-as-9 \
++    --slave   /usr/bin/llvm-bcanalyzer   llvm-bcanalyzer  /usr/bin/llvm-bcanalyzer-9 \
++    --slave   /usr/bin/llvm-c-test       llvm-c-test      /usr/bin/llvm-c-test-9 \
++    --slave   /usr/bin/llvm-cov          llvm-cov         /usr/bin/llvm-cov-9 \
++    --slave   /usr/bin/llvm-diff         llvm-diff        /usr/bin/llvm-diff-9 \
++    --slave   /usr/bin/llvm-dis          llvm-dis         /usr/bin/llvm-dis-9 \
++    --slave   /usr/bin/llvm-dwarfdump    llvm-dwarfdump   /usr/bin/llvm-dwarfdump-9 \
++    --slave   /usr/bin/llvm-extract      llvm-extract     /usr/bin/llvm-extract-9 \
++    --slave   /usr/bin/llvm-link         llvm-link        /usr/bin/llvm-link-9 \
++    --slave   /usr/bin/llvm-mc           llvm-mc          /usr/bin/llvm-mc-9 \
++    --slave   /usr/bin/llvm-nm           llvm-nm          /usr/bin/llvm-nm-9 \
++    --slave   /usr/bin/llvm-objdump      llvm-objdump     /usr/bin/llvm-objdump-9 \
++    --slave   /usr/bin/llvm-ranlib       llvm-ranlib      /usr/bin/llvm-ranlib-9 \
++    --slave   /usr/bin/llvm-readobj      llvm-readobj     /usr/bin/llvm-readobj-9 \
++    --slave   /usr/bin/llvm-rtdyld       llvm-rtdyld      /usr/bin/llvm-rtdyld-9 \
++    --slave   /usr/bin/llvm-size         llvm-size        /usr/bin/llvm-size-9 \
++    --slave   /usr/bin/llvm-stress       llvm-stress      /usr/bin/llvm-stress-9 \
++    --slave   /usr/bin/llvm-symbolizer   llvm-symbolizer  /usr/bin/llvm-symbolizer-9 \
++    --slave   /usr/bin/llvm-tblgen       llvm-tblgen      /usr/bin/llvm-tblgen-9
++
++update-alternatives \
++  --install /usr/bin/clang                 clang                  /usr/bin/clang-9     20 \
++  --slave   /usr/bin/clang++               clang++                /usr/bin/clang++-9 \
++  --slave   /usr/bin/clang-cpp             clang-cpp              /usr/bin/clang-cpp-9
+diff --git a/fuzzers/aflplusplus_asan/run.sh b/fuzzers/aflplusplus_asan/run.sh
+new file mode 100755
+index 00000000..c2f1c100
+--- /dev/null
++++ b/fuzzers/aflplusplus_asan/run.sh
+@@ -0,0 +1,26 @@
++#!/bin/bash
++
++##
++# Pre-requirements:
++# - env FUZZER: path to fuzzer work dir
++# - env TARGET: path to target work dir
++# - env OUT: path to directory where artifacts are stored
++# - env SHARED: path to directory shared with host (to store results)
++# - env PROGRAM: name of program to run (should be found in $OUT)
++# - env ARGS: extra arguments to pass to the program
++# - env FUZZARGS: extra arguments to pass to the fuzzer
++##
++
++mkdir -p "$SHARED/findings"
++
++flag_cmplog=(-m none -c "$OUT/cmplog/$PROGRAM")
++
++export AFL_SKIP_CPUFREQ=1
++export AFL_NO_AFFINITY=1
++export AFL_NO_UI=1
++export AFL_MAP_SIZE=256000
++export AFL_DRIVER_DONT_DEFER=1
++
++"$FUZZER/repo/afl-fuzz" -i "$TARGET/corpus/$PROGRAM" -o "$SHARED/findings" \
++    "${flag_cmplog[@]}" -d \
++    $FUZZARGS -- "$OUT/afl/$PROGRAM" $ARGS 2>&1
+diff --git a/fuzzers/aflplusplus_asan/runonce.sh b/fuzzers/aflplusplus_asan/runonce.sh
+new file mode 100755
+index 00000000..1f269e3a
+--- /dev/null
++++ b/fuzzers/aflplusplus_asan/runonce.sh
+@@ -0,0 +1,28 @@
++#!/bin/bash -e
++
++##
++# Pre-requirements:
++# - $1: path to test case
++# - env FUZZER: path to fuzzer work dir
++# - env TARGET: path to target work dir
++# - env OUT: path to directory where artifacts are stored
++# - env PROGRAM: name of program to run (should be found in $OUT)
++# - env ARGS: extra arguments to pass to the program
++##
++
++export TIMELIMIT=0.1s
++
++run_limited()
++{
++    ${@:1}
++    test $? -lt 128
++}
++export -f run_limited
++
++args="${ARGS/@@/"'$1'"}"
++if [ -z "$args" ]; then
++    args="'$1'"
++fi
++
++timeout -s KILL --preserve-status $TIMELIMIT bash -c \
++    "run_limited '$OUT/afl/$PROGRAM' $args"

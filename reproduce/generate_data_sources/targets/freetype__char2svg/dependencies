@@ -1,0 +1,7 @@
+g++-multilib
+gcc-multilib
+lib32z1
+libc6
+libgcc1
+libstdc++6
+zlib1g

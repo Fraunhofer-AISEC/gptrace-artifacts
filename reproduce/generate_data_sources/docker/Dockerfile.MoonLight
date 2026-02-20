@@ -1,0 +1,63 @@
+# Copyright 2025 Fraunhofer AISEC
+# Fraunhofer-Gesellschaft zur Förderung der angewandten Forschung e.V.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Setup MoonLight
+
+ARG BASEIMG
+
+FROM ${BASEIMG}
+
+USER root:root
+
+RUN dpkg --add-architecture i386
+
+ARG PROJPATH="/project"
+
+ARG USER_ID=1000
+ARG GROUP_ID=1000
+RUN groupadd -g ${GROUP_ID} project && \
+        useradd -l -u ${USER_ID} -K UMASK=0000 -d /home -g project project && \
+	chown project:project /home
+
+# Install dependencies
+COPY dependencies /tmp/
+RUN apt update && \
+    apt install -y $(cat /tmp/dependencies)
+
+ARG PROGRAM
+
+# Build Intel PIN
+ENV PIN_ROOT="${PROJPATH}/pin-3.31"
+ENV PIN_TARGET=ia32
+RUN (cd "${PROJPATH}/default/intel_pin" && make TARGET="${PIN_TARGET}" PIN_ROOT="${PIN_ROOT}")
+RUN ln -s "${PROJPATH}/default/intel_pin/obj-ia32/bbl_tracing.so" "${PROJPATH}/default/bbl_tracing.so"
+
+# Copy binary
+ARG SRCPATH="binary/afl-build"
+COPY ${SRCPATH} ${PROJPATH}/src
+RUN ln -s ${PROJPATH}/src/bin/${PROGRAM} ${PROJPATH}/binary
+ENV LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${PROJPATH}/src/lib/
+
+RUN chown -R project:project ${PROJPATH}
+
+USER project:project
+WORKDIR ${PROJPATH}
+
+ENV PATH=$PATH:/home/.local/bin
+RUN wget -qO- https://astral.sh/uv/install.sh | sh
+RUN uv venv -p 3.11 ${PROJPATH}/gptrace/.venv
+RUN uv venv -p 3.11 ${PROJPATH}/default/.venv
+
+ENTRYPOINT "/bin/bash"

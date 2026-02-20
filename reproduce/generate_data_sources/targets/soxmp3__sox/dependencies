@@ -1,0 +1,10 @@
+file
+g++-multilib
+gcc-multilib
+lib32z1
+libc6
+libc6-dev:i386
+libgcc1
+libmad0-dev:i386
+libstdc++6
+zlib1g

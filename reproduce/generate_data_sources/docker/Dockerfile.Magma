@@ -1,0 +1,55 @@
+# Copyright 2025 Fraunhofer AISEC
+# Fraunhofer-Gesellschaft zur Förderung der angewandten Forschung e.V.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Setup Magma
+
+ARG BASEIMG
+
+FROM ${BASEIMG}
+
+USER root:root
+
+ARG PROJPATH="/project"
+
+# Rename magma user and group to project
+RUN usermod -l project magma
+RUN groupmod -n project magma
+
+RUN chown -R project:project /home
+
+RUN apt update
+
+ARG PROGRAM
+
+# Build Intel PIN
+ENV PIN_ROOT="${PROJPATH}/pin-3.31"
+ENV PIN_TARGET=intel64
+RUN (cd "${PROJPATH}/default/intel_pin" && make TARGET="${PIN_TARGET}" PIN_ROOT="${PIN_ROOT}")
+RUN ln -s "${PROJPATH}/default/intel_pin/obj-intel64/bbl_tracing.so" "${PROJPATH}/default/bbl_tracing.so"
+
+# Copy binary
+RUN ln -s /magma_out/afl/${PROGRAM} ${PROJPATH}/binary
+
+RUN chown -R project:project ${PROJPATH}
+
+USER project:project
+WORKDIR ${PROJPATH}
+
+ENV PATH=$PATH:/home/.local/bin
+RUN wget -qO- https://astral.sh/uv/install.sh | sh
+RUN uv venv -p 3.11 ${PROJPATH}/gptrace/.venv
+RUN uv venv -p 3.11 ${PROJPATH}/default/.venv
+
+ENTRYPOINT "/bin/bash"

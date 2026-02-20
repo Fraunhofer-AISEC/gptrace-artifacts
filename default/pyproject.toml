@@ -1,0 +1,47 @@
+[project]
+name = "default"
+version = "0.1.0"
+description = "Rudimentary implementation of DeFault based on Zhang et al."
+readme = "README.md"
+authors = [
+    { name = "Patrick Herter", email = "patrick.herter@aisec.fraunhofer.de" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "tqdm>=4.66.5",
+]
+classifiers = ["Private :: Do Not Upload"]
+license = "Apache-2.0"
+
+[project.scripts]
+default = "default:main"
+
+[build-system]
+requires = ["uv_build>=0.9.18,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = [
+    # pycodestyle
+    "E",
+    # Pyflakes
+    "F",
+    # pyupgrade
+    "UP",
+    # flake8-bugbear
+    "B",
+    # isort
+    "I",
+    # pydocstyle
+    "D",
+]
+ignore = ["D203", "D213"]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.18.2",
+    "types-tqdm>=4.67.0.20250809",
+]

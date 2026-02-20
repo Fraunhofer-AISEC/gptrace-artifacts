@@ -1,0 +1,82 @@
+# Copyright 2025 Fraunhofer AISEC
+# Fraunhofer-Gesellschaft zur Förderung der angewandten Forschung e.V.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Build a Docker image for each evaluation target
+
+ARG BASEIMG
+
+FROM ${BASEIMG}
+
+
+# Basic setup
+
+USER root
+
+ENV PROJPATH="/project"
+RUN mkdir -p "${PROJPATH}/out"
+
+RUN mkdir -p /home && cp /root/.bashrc /home/
+
+WORKDIR /tmp
+
+RUN apt update && apt install -y gdb git parallel python3 python3-pip wget
+
+COPY env_variables.sh "${PROJPATH}/env_variables.sh"
+RUN chmod +x "${PROJPATH}/env_variables.sh"
+COPY run.sh "${PROJPATH}/run.sh"
+RUN chmod +x "${PROJPATH}/run.sh"
+COPY run_pin.sh "${PROJPATH}/run_pin.sh"
+RUN chmod +x "${PROJPATH}/run_pin.sh"
+COPY run_default.sh "${PROJPATH}/run_default.sh"
+RUN chmod +x "${PROJPATH}/run_default.sh"
+COPY run_crashwalk.sh "${PROJPATH}/run_crashwalk.sh"
+RUN chmod +x "${PROJPATH}/run_crashwalk.sh"
+COPY run_crashwalk_provided.sh "${PROJPATH}/run_crashwalk_provided.sh"
+RUN chmod +x "${PROJPATH}/run_crashwalk_provided.sh"
+COPY rename.py "${PROJPATH}/rename.py"
+COPY gptrace "${PROJPATH}/gptrace"
+COPY default "${PROJPATH}/default"
+RUN mkdir -p "${PROJPATH}/clean_traces"
+
+
+# Setup Intel PIN which is needed for DeFault
+
+RUN mkdir -p "${PROJPATH}/tracing"
+RUN wget -O "${PROJPATH}/pin.tar.gz" https://software.intel.com/sites/landingpage/pintool/downloads/pin-external-3.31-98869-gfa6f126a8-gcc-linux.tar.gz
+RUN tar xzf "${PROJPATH}/pin.tar.gz" -C "${PROJPATH}"
+RUN mv "${PROJPATH}/pin-external-3.31-98869-gfa6f126a8-gcc-linux" "${PROJPATH}/pin-3.31"
+
+
+# Setup Crashwalk
+
+RUN set -eux; \
+    wget https://go.dev/dl/go1.25.5.linux-amd64.tar.gz; \
+    rm -rf /usr/local/go && tar -C /usr/local -xzf go1.25.5.linux-amd64.tar.gz; \
+    echo "export PATH=$PATH:/usr/local/go/bin" >> /etc/profile
+
+RUN git clone https://github.com/jfoote/exploitable.git "${PROJPATH}/exploitable"
+
+ENV CW_EXPLOITABLE="${PROJPATH}/exploitable/exploitable"
+ENV PATH="${PATH}:/usr/local/go/bin"
+
+RUN git clone https://github.com/bnagy/crashwalk.git "${PROJPATH}/crashwalk"
+RUN (cd "${PROJPATH}/crashwalk" && make)
+
+COPY crashwalk_gta.py "${PROJPATH}/crashwalk/crashwalk_gta.py"
+
+
+WORKDIR ${PROJPATH}
+
+ENTRYPOINT "/bin/bash"
