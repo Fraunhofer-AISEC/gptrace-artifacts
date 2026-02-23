@@ -44,7 +44,14 @@ embeddings for the targets and crashing inputs that we used in our evaluation.
   Note that, as we explain in section 4 of our paper, we made small adjustments
   to the labeling of the crashing inputs by restructuring the file tree of the
   benchmark.
-  These changes are based on the comments in the following table:
+  These changes are based on the mappings from bug IDs to CVE IDs in Table A1
+  in the [Magma paper](https://hexhive.epfl.ch/publications/files/21SIGMETRICS.pdf#appendix.A)
+  and Table 4 in the [MoonLight paper](https://arxiv.org/pdf/1905.13055#subsection.5.2)
+  as well as Table 5 in the
+  [Igor paper](https://hexhive.epfl.ch/publications/files/21CCS.pdf#appendix.D)
+  which shows which bug IDs share the same underlying vulnerabilities.
+  They are summarized in the following table, together with an overview of
+  which bugs we were unable to reproduce:
 
   | Target             | Bug ID               | CVE ID     | Comment                                                                    |
   | ------------------ | -------------------- | ---------- | -------------------------------------------------------------------------- |
